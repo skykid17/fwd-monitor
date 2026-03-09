@@ -251,7 +251,23 @@ def _scrape_rendered_cards(page) -> list[dict]:
             const href = el.getAttribute('href') || '';
             if (!href.includes('travel') && !cardText.toLowerCase().includes('travel')) return;
 
-            results.push({ text: cardText, href: href });
+            // Look for a dedicated promo/coupon code element inside the card.
+            // FWD may render it as a <code> tag or an element whose class name
+            // contains "code", "coupon", "voucher", or "badge".
+            let promoCode = '';
+            const codeEl = node.querySelector(
+                'code, [class*="promo-code"], [class*="coupon-code"], ' +
+                '[class*="voucher-code"], [class*="discount-code"], ' +
+                '[class*="promo_code"], [class*="coupon"]'
+            );
+            if (codeEl) {
+                const raw = (codeEl.innerText || codeEl.textContent || '')
+                    .replace(/\s+/g, '').toUpperCase();
+                // Accept only code-shaped strings: letters/digits/hyphens, 3-20 chars
+                if (/^[A-Z][A-Z0-9-]{2,19}$/.test(raw)) promoCode = raw;
+            }
+
+            results.push({ text: cardText, href: href, promoCode: promoCode });
         });
 
         // Deduplicate by first 80 chars of text
@@ -278,8 +294,9 @@ def _scrape_rendered_cards(page) -> list[dict]:
     for card in card_data:
         card_text = card.get("text", "")
         href = card.get("href", "")
+        js_promo_code = card.get("promoCode", "")
         lines = [ln.strip() for ln in card_text.splitlines() if ln.strip()]
-        promo = _parse_dom_card(lines, card_text, href)
+        promo = _parse_dom_card(lines, card_text, href, js_promo_code)
         if promo is None or not promo["title"] or promo["title"] in seen_titles:
             continue
         seen_titles.add(promo["title"])
@@ -292,7 +309,7 @@ def _scrape_rendered_cards(page) -> list[dict]:
     return promotions
 
 
-def _parse_dom_card(lines: list[str], card_text: str, href: str) -> dict | None:
+def _parse_dom_card(lines: list[str], card_text: str, href: str, js_promo_code: str = "") -> dict | None:
     """Parse a single DOM card into a promotion dict.
 
     Returns None when the card has no promotional information
@@ -344,7 +361,9 @@ def _parse_dom_card(lines: list[str], card_text: str, href: str) -> dict | None:
         description = description[:117] + "..."
 
     promo_code_match = PROMO_CODE_RE.search(card_text)
-    promo_code = promo_code_match.group(1).upper() if promo_code_match else ""
+    regex_code = promo_code_match.group(1).upper() if promo_code_match else ""
+    # JS element-based extraction takes priority; fall back to regex scan of card text
+    promo_code = js_promo_code or regex_code
 
     if href and not href.startswith("http"):
         href = f"https://www.fwd.com.sg{href}"

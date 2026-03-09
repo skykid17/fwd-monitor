@@ -99,6 +99,7 @@ def run() -> None:
             stored_by_id[pid]["discount"] = promo.get("discount", "")
             stored_by_id[pid]["expiry"] = promo.get("expiry", "")
             stored_by_id[pid]["description"] = promo.get("description", "")
+            stored_by_id[pid]["promo_code"] = promo.get("promo_code", "")
             stored_by_id[pid]["link"] = promo.get("link", "")
         else:
             stored_by_id[pid] = {
@@ -107,6 +108,7 @@ def run() -> None:
                 "discount": promo.get("discount", ""),
                 "expiry": promo.get("expiry", ""),
                 "description": promo.get("description", ""),
+                "promo_code": promo.get("promo_code", ""),
                 "link": promo.get("link", ""),
                 "content_hash": content_hash,
                 "notified_at": now_iso,
