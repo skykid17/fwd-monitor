@@ -158,36 +158,66 @@ def _scrape_rendered_cards(page) -> list[dict]:
     whose parent card is travel-related, walks up to the card container,
     and returns deduplicated card text + href. Robust to class-name changes.
     """
-    # Click Travel tab so only Travel cards are visible
+    # Click Travel tab so only Travel cards are visible.
+    # Use exact-text role/filter locators to avoid matching nav "Travel Insurance" links.
     try:
-        tab = page.locator('button:has-text("Travel"), li:has-text("Travel"), a:has-text("Travel")').first
-        if tab.is_visible(timeout=3000):
-            tab.click()
-            time.sleep(MIN_DELAY_S)
-    except Exception:
-        pass
+        # Prefer [role="tab"] with exact name; fall back to filter on exact text.
+        tab = page.get_by_role("tab", name=re.compile(r"^\s*Travel\s*$", re.IGNORECASE))
+        if not tab.count():
+            tab = (
+                page.locator("button, li, a")
+                .filter(has_text=re.compile(r"^\s*Travel\s*$", re.IGNORECASE))
+                .first
+            )
+        else:
+            tab = tab.first
+
+        tab.wait_for(state="visible", timeout=8000)
+        tab.click()
+        logger.debug("Travel tab clicked")
+
+        # Wait for the page to settle after the tab switch.
+        try:
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            time.sleep(3)
+    except Exception as exc:
+        logger.warning("Travel tab click failed: %s", exc)
 
     EXTRACT_CARDS_JS = """() => {
-        const CTA_TEXTS = ['check your price', 'get a quote', 'buy now', 'find out more'];
+        const CTA_TEXTS = [
+            'check your price', 'get a quote', 'buy now',
+            'find out more', 'learn more', 'get quote',
+        ];
         const results = [];
 
         document.querySelectorAll('a, button').forEach(el => {
-            const text = (el.innerText || '').toLowerCase().trim();
-            if (!CTA_TEXTS.includes(text)) return;
+            // Normalise text: collapse whitespace, handle non-breaking spaces
+            const text = (el.innerText || el.textContent || '')
+                .toLowerCase().replace(/[\\u00a0\\s]+/g, ' ').trim();
+            if (!CTA_TEXTS.some(cta => text.includes(cta))) return;
 
-            // Must be visible and not in nav/footer/header
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return;
+            // Must not be in nav/footer/header
             if (el.closest('nav, footer, header, [role="navigation"]')) return;
 
-            // Walk up to find the enclosing card (height 150–800px)
+            // Visibility check that works in headless/CI environments.
+            // checkVisibility() (Chrome 105+) handles display:none, visibility:hidden,
+            // content-visibility:hidden, and opacity:0.  Fall back to offsetParent
+            // for older engines.
+            if (typeof el.checkVisibility === 'function') {
+                if (!el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) return;
+            } else {
+                if (!el.offsetParent && el.tagName !== 'BODY') return;
+            }
+
+            // Walk up to find the enclosing card (height 100–1200px)
             let node = el.parentElement;
             let cardText = '';
             for (let i = 0; i < 12; i++) {
                 if (!node || node === document.body) break;
                 const r = node.getBoundingClientRect();
-                if (r.height >= 150 && r.height <= 800) {
-                    cardText = node.innerText;
+                if (r.height >= 100 && r.height <= 1200) {
+                    cardText = node.innerText || node.textContent || '';
                     break;
                 }
                 node = node.parentElement;
@@ -304,10 +334,20 @@ def _run_scrape() -> list[dict] | None:
         browser = p.chromium.launch(headless=True)
         try:
             page = browser.new_page(user_agent=USER_AGENT)
+            # Explicit viewport ensures getBoundingClientRect() returns real values
+            # and the page doesn't render in a narrow mobile breakpoint.
+            page.set_viewport_size({"width": 1280, "height": 900})
             # domcontentloaded is faster and more reliable than networkidle
             page.goto(FWD_URL, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
-            # Give React time to hydrate and populate window.__PRELOADED_STATE__
-            time.sleep(MIN_DELAY_S)
+            # Wait until __PRELOADED_STATE__ is populated by the JS framework.
+            # Falls back to a fixed sleep if the function never resolves (e.g. CSP).
+            try:
+                page.wait_for_function(
+                    "() => !!(window.__PRELOADED_STATE__ && window.__PRELOADED_STATE__.pageConfig)",
+                    timeout=15_000,
+                )
+            except Exception:
+                time.sleep(MIN_DELAY_S)
 
             # Strategy A: structured data from __PRELOADED_STATE__
             state = _extract_preloaded_state(page)
