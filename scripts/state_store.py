@@ -3,6 +3,7 @@
 import json
 import logging
 import requests
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -53,3 +54,8 @@ def save_state(gist_id: str, pat: str, state: dict) -> None:
 def reset_state(gist_id: str, pat: str) -> None:
     """Reset the Gist state store to an empty promotions list."""
     save_state(gist_id, pat, DEFAULT_STATE)
+
+
+if __name__ == "__main__":
+    reset_state(os.getenv("GIST_ID"), os.getenv("GIST_PAT"))
+    print("State store reset to default empty state.")
