@@ -34,12 +34,15 @@ def send_new_or_updated(bot_token: str, chat_id: str, promotion: dict, tag: str 
     if len(description) > 120:
         description = description[:117] + "..."
     link = promotion.get("link", "https://www.fwd.com.sg/insurance-promotions/")
+    promo_code = promotion.get("promo_code", "").strip()
+    promo_code_line = f"\u2022 <b>Promo code:</b> <code>{promo_code}</code>\n" if promo_code else ""
 
     text = (
         f"\U0001f389 <b>FWD Travel Insurance Promotion</b> [{tag}]\n"
         f"\n"
         f"\u2022 <b>Title:</b> {promotion.get('title', 'N/A')}\n"
         f"\u2022 <b>Discount:</b> {promotion.get('discount', 'N/A')}\n"
+        f"{promo_code_line}"
         f"\u2022 <b>Valid until:</b> {expiry}\n"
         f"\u2022 <b>Terms:</b> {description}\n"
         f"\n"

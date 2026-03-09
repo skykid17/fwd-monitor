@@ -123,3 +123,33 @@ def test_extract_preloaded_state_fallback_to_html():
     result = _extract_preloaded_state(mock_page)
     assert result is not None
     assert "pageConfig" in result
+
+
+def test_parse_promotion_extracts_promo_code_from_field():
+    raw = {
+        "product_title": "Travel",
+        "promo_code": "TRAVEL40",
+        "button": {"link": "/travel-insurance/"},
+    }
+    result = _parse_promotion(raw)
+    assert result["promo_code"] == "TRAVEL40"
+
+
+def test_parse_promotion_extracts_promo_code_from_description():
+    raw = {
+        "product_title": "Travel",
+        "promo_description": "Use promo code MEGA2024 at checkout",
+        "button": {"link": "/travel-insurance/"},
+    }
+    result = _parse_promotion(raw)
+    assert result["promo_code"] == "MEGA2024"
+
+
+def test_parse_promotion_no_promo_code():
+    raw = {
+        "product_title": "Travel",
+        "promo_description": "No code required",
+        "button": {"link": "/travel-insurance/"},
+    }
+    result = _parse_promotion(raw)
+    assert result["promo_code"] == ""

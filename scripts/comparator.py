@@ -32,6 +32,7 @@ def generate_content_hash(promotion: dict) -> str:
         promotion.get("discount", ""),
         promotion.get("expiry", ""),
         promotion.get("description", ""),
+        promotion.get("promo_code", ""),
         promotion.get("link", ""),
     ]
     combined = "|".join(parts)

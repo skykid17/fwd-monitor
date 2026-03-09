@@ -14,6 +14,13 @@ MAX_RETRIES = 3
 TIMEOUT_MS = 60_000
 MIN_DELAY_S = 2
 
+# Matches "promo code: TRAVEL40", "use code MEGA2024", etc.
+PROMO_CODE_RE = re.compile(
+    r"(?:promo(?:tion)?\s+code|coupon\s+code|use\s+code|enter\s+code"
+    r"|with\s+(?:the\s+)?code|discount\s+code)[:\s]+([A-Z0-9][A-Z0-9\-]{2,20})",
+    re.IGNORECASE,
+)
+
 # Realistic browser UA reduces bot-detection blocks on headless requests
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -141,12 +148,28 @@ def _parse_promotion(raw: dict) -> dict:
         if pct_match:
             discount = pct_match.group(1)
 
-    logger.debug("Parsed from state: title=%r discount=%r expiry=%r", title, discount, expiry)
+    # Promo code: check known CMS fields first, then regex scan all text fields
+    promo_code = (
+        raw.get("promo_code")
+        or raw.get("coupon_code")
+        or raw.get("voucher_code")
+        or raw.get("discount_code")
+        or ""
+    )
+    if not promo_code:
+        for field_val in (discount, description, raw.get("promo_title", ""), raw.get("tc_caption", "")):
+            m = PROMO_CODE_RE.search(field_val or "")
+            if m:
+                promo_code = m.group(1).upper()
+                break
+
+    logger.debug("Parsed from state: title=%r discount=%r expiry=%r promo_code=%r", title, discount, expiry, promo_code)
     return {
         "title": title,
         "discount": discount.strip(),
         "expiry": expiry.strip(),
         "description": description.strip(),
+        "promo_code": promo_code.upper().strip(),
         "link": link,
     }
 
@@ -288,6 +311,9 @@ def _scrape_rendered_cards(page) -> list[dict]:
         if len(description) > 120:
             description = description[:117] + "..."
 
+        promo_code_match = PROMO_CODE_RE.search(card_text)
+        promo_code = promo_code_match.group(1).upper() if promo_code_match else ""
+
         if href and not href.startswith("http"):
             href = f"https://www.fwd.com.sg{href}"
 
@@ -300,9 +326,10 @@ def _scrape_rendered_cards(page) -> list[dict]:
             "discount": discount,
             "expiry": expiry,
             "description": description,
+            "promo_code": promo_code,
             "link": href or FWD_URL,
         })
-        logger.debug("DOM card: title=%r discount=%r expiry=%r", title, discount, expiry)
+        logger.debug("DOM card: title=%r discount=%r expiry=%r promo_code=%r", title, discount, expiry, promo_code)
 
     return promotions
 

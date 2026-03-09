@@ -110,3 +110,41 @@ def test_missing_expiry_shows_not_specified(mock_post):
 
     payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
     assert "Not specified" in payload["text"]
+
+
+@patch("scripts.notifier.requests.post")
+def test_promo_code_included_when_present(mock_post):
+    mock_post.return_value = MagicMock(status_code=200)
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    promo = {
+        "title": "Promo Deal",
+        "discount": "40%",
+        "expiry": "2026-12-31",
+        "description": "Use code to redeem",
+        "promo_code": "TRAVEL40",
+        "link": "https://www.fwd.com.sg/",
+    }
+    send_new_or_updated("fake_token", "12345", promo, tag="NEW")
+
+    payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+    assert "TRAVEL40" in payload["text"]
+    assert "Promo code" in payload["text"]
+
+
+@patch("scripts.notifier.requests.post")
+def test_promo_code_omitted_when_absent(mock_post):
+    mock_post.return_value = MagicMock(status_code=200)
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    promo = {
+        "title": "No Code Deal",
+        "discount": "20%",
+        "expiry": "",
+        "description": "No code needed",
+        "link": "https://www.fwd.com.sg/",
+    }
+    send_new_or_updated("fake_token", "12345", promo, tag="NEW")
+
+    payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+    assert "Promo code" not in payload["text"]
