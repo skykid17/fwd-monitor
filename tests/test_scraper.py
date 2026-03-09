@@ -3,7 +3,7 @@
 import json
 from unittest.mock import patch, MagicMock
 
-from scripts.scraper import _extract_preloaded_state, _find_travel_promotions, _parse_promotion
+from scripts.scraper import _extract_preloaded_state, _find_travel_promotions, _parse_promotion, _parse_dom_card
 
 
 def _make_preloaded_state(travel_products=None):
@@ -153,3 +153,46 @@ def test_parse_promotion_no_promo_code():
     }
     result = _parse_promotion(raw)
     assert result["promo_code"] == ""
+
+
+# --- _parse_dom_card tests ---
+
+def test_parse_dom_card_splits_discount_and_expiry():
+    """'40% off Ends in1d 6h 6m' should split into separate discount and expiry."""
+    lines = ["40% off Ends in1d 6h 6m", "Buy travel insurance", "Find out more"]
+    card_text = "\n".join(lines)
+    result = _parse_dom_card(lines, card_text, "/travel-insurance/")
+    assert result is not None
+    assert result["discount"] == "40% off"
+    assert result["expiry"].lower().startswith("ends in")
+
+
+def test_parse_dom_card_faq_returns_none():
+    """Cards with no discount/expiry (FAQ entries) should return None."""
+    lines = [
+        'What does "Cancel For Any Reason" optional benefit cover?',
+        "Trip cut short for any reason: We will pay this benefit if your trip has commenced.",
+        "Find out more",
+    ]
+    card_text = "\n".join(lines)
+    result = _parse_dom_card(lines, card_text, "/travel-insurance/faq/")
+    assert result is None
+
+
+def test_parse_dom_card_extracts_promo_code():
+    """Promo code embedded in card text should be extracted."""
+    lines = ["40% off", "Use promo code MEGA2024 at checkout", "Valid until 31 Dec 2026", "Get a quote"]
+    card_text = "\n".join(lines)
+    result = _parse_dom_card(lines, card_text, "/travel-insurance/")
+    assert result is not None
+    assert result["promo_code"] == "MEGA2024"
+
+
+def test_parse_dom_card_separate_expiry_line():
+    """When discount and expiry are on different lines both are captured."""
+    lines = ["40% off", "Valid until 31 Dec 2026", "Great travel coverage", "Buy now"]
+    card_text = "\n".join(lines)
+    result = _parse_dom_card(lines, card_text, "/travel-insurance/")
+    assert result is not None
+    assert result["discount"] == "40% off"
+    assert result["expiry"] == "Valid until 31 Dec 2026"

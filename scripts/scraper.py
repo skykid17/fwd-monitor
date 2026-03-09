@@ -276,62 +276,90 @@ def _scrape_rendered_cards(page) -> list[dict]:
     seen_titles: set[str] = set()
 
     for card in card_data:
-        card_text: str = card.get("text", "")
-        href: str = card.get("href", "")
+        card_text = card.get("text", "")
+        href = card.get("href", "")
         lines = [ln.strip() for ln in card_text.splitlines() if ln.strip()]
-
-        discount = next(
-            (ln for ln in lines if re.search(r"\d+%\s*off|promo\s*code", ln, re.IGNORECASE)),
-            "",
-        )
-        expiry = next(
-            (ln for ln in lines if re.search(r"ends?\s*in|valid|until|\d{1,2}\s+\w+\s+\d{4}", ln, re.IGNORECASE)),
-            "",
-        )
-
-        captured = {discount, expiry}
-        title = next(
-            (ln for ln in lines
-             if ln not in captured
-             and 2 < len(ln) <= 60
-             and not re.search(
-                 r"\d+%|check your price|get a quote|buy now|find out more"
-                 r"|t&c|terms|^\d+\s+of\s+\d+$|^travel insurance$",
-                 ln, re.IGNORECASE,
-             )),
-            "",
-        )
-
-        captured.add(title)
-        description = max(
-            (ln for ln in lines if ln not in captured and len(ln) > 20),
-            key=len,
-            default="",
-        )
-        if len(description) > 120:
-            description = description[:117] + "..."
-
-        promo_code_match = PROMO_CODE_RE.search(card_text)
-        promo_code = promo_code_match.group(1).upper() if promo_code_match else ""
-
-        if href and not href.startswith("http"):
-            href = f"https://www.fwd.com.sg{href}"
-
-        if not title or title in seen_titles:
+        promo = _parse_dom_card(lines, card_text, href)
+        if promo is None or not promo["title"] or promo["title"] in seen_titles:
             continue
-
-        seen_titles.add(title)
-        promotions.append({
-            "title": title,
-            "discount": discount,
-            "expiry": expiry,
-            "description": description,
-            "promo_code": promo_code,
-            "link": href or FWD_URL,
-        })
-        logger.debug("DOM card: title=%r discount=%r expiry=%r promo_code=%r", title, discount, expiry, promo_code)
+        seen_titles.add(promo["title"])
+        promotions.append(promo)
+        logger.debug(
+            "DOM card: title=%r discount=%r expiry=%r promo_code=%r",
+            promo["title"], promo["discount"], promo["expiry"], promo["promo_code"],
+        )
 
     return promotions
+
+
+def _parse_dom_card(lines: list[str], card_text: str, href: str) -> dict | None:
+    """Parse a single DOM card into a promotion dict.
+
+    Returns None when the card has no promotional information
+    (e.g. FAQ entries that have a CTA button but no discount/expiry).
+    """
+    discount_line = next(
+        (ln for ln in lines if re.search(r"\d+%\s*off|promo\s*code", ln, re.IGNORECASE)),
+        "",
+    )
+    # Strip any countdown timer text concatenated onto the discount
+    # e.g. "40% off Ends in1d 6h 6m" → "40% off"
+    discount = re.sub(r"\s+ends?\s+in.*$", "", discount_line, flags=re.IGNORECASE).strip()
+
+    expiry_line = next(
+        (ln for ln in lines if re.search(r"ends?\s*in|valid|until|\d{1,2}\s+\w+\s+\d{4}", ln, re.IGNORECASE)),
+        "",
+    )
+    # If expiry matched the same line as discount, keep only the "Ends in..." part
+    if expiry_line == discount_line:
+        m = re.search(r"(ends?\s+in.*)", expiry_line, re.IGNORECASE)
+        expiry = m.group(1).strip() if m else ""
+    else:
+        expiry = expiry_line
+
+    # Skip FAQ/blog cards that carry no promotional information
+    if not discount and not expiry:
+        return None
+
+    captured = {discount_line, expiry_line}
+    title = next(
+        (ln for ln in lines
+         if ln not in captured
+         and 2 < len(ln) <= 60
+         and not re.search(
+             r"\d+%|check your price|get a quote|buy now|find out more"
+             r"|t&c|terms|^\d+\s+of\s+\d+$|^travel insurance$",
+             ln, re.IGNORECASE,
+         )),
+        "",
+    )
+
+    captured.add(title)
+    description = max(
+        (ln for ln in lines if ln not in captured and len(ln) > 20),
+        key=len,
+        default="",
+    )
+    if len(description) > 120:
+        description = description[:117] + "..."
+
+    promo_code_match = PROMO_CODE_RE.search(card_text)
+    promo_code = promo_code_match.group(1).upper() if promo_code_match else ""
+
+    if href and not href.startswith("http"):
+        href = f"https://www.fwd.com.sg{href}"
+
+    return {
+        "title": title,
+        "discount": discount,
+        "expiry": expiry,
+        "description": description,
+        "promo_code": promo_code,
+        "link": href or FWD_URL,
+    }
+
+
+
 
 
 def scrape_promotions() -> list[dict]:
